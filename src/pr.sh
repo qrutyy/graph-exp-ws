@@ -36,7 +36,7 @@ GRAPHS=(
     "datasets/rgg_n_2_22_s0.mtx"
 )
 
-RUNS=5
+RUNS=20
 
 for G_REL in "${GRAPHS[@]}"; do
     G_PATH="$BASEDIR/$G_REL"

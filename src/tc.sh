@@ -36,7 +36,7 @@ GRAPHS=(
 
 METHODS=(1 2 3 4 5 6)
 PRESORTS=(0 1 2)
-RUNS=10
+RUNS=20
 
 for G_REL in "${GRAPHS[@]}"; do
     G_PATH="$BASEDIR/$G_REL"

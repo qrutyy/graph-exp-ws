@@ -32,7 +32,7 @@ echo "Graph,Library,Version,Delta,Iteration,Time_ms" > "$FINAL_CSV"
 
 GRAPHS=("datasets/soc-LiveJournal1.mtx" "datasets/patents.mtx")
 DELTAS=(0.5 1.0 2.0 5.0 7.5 10.0)
-RUNS=5
+RUNS=20
 
 for RTYPE in "Normal" "Sym"; do
     echo -e "\n>>> Running LAGraph ($RTYPE)..."
