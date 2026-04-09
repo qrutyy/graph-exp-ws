@@ -24,9 +24,9 @@ int main(int argc, char **argv) {
 
 	LAGraph_Graph G = NULL;
     LAGraph_New(&G, &A, LAGraph_ADJACENCY_DIRECTED, msg);
-    
+
     LAGraph_Cached_OutDegree(G, msg);
-    LAGraph_Cached_AT(G, msg);       
+    LAGraph_Cached_AT(G, msg);
 
     float alpha = 0.85f;
     float eps = 1e-4f;

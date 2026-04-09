@@ -13,7 +13,7 @@ int main(int argc, char **argv) {
     char msg[1024];
     if (LAGraph_Init(msg) != GrB_SUCCESS) return 1;
 //	GxB_Global_Option_set(GxB_BURBLE, true);
-    int nthreads = omp_get_max_threads(); 
+    int nthreads = omp_get_max_threads();
     GxB_Global_Option_set(GxB_GLOBAL_NTHREADS, nthreads);
 
 	int actual_nthreads;
@@ -42,7 +42,7 @@ int main(int argc, char **argv) {
         GrB_Matrix_eWiseAdd_BinaryOp(S, NULL, NULL, GrB_LOR, A, AT, NULL);
         GrB_free(&A); GrB_free(&AT);
         A = S;
-        is_directed = 0; // undirected 
+        is_directed = 0; // undirected
     }
 
     LAGraph_Graph G = NULL;

@@ -61,9 +61,9 @@ int main(int argc, char **argv) {
     LAGraph_Graph G = NULL;
     LAGraph_Kind kind = atoi(argv[2]) ? LAGraph_ADJACENCY_DIRECTED : LAGraph_ADJACENCY_UNDIRECTED;
     LAGraph_New(&G, &A, kind, msg);
-    
+
     GrB_Index source = find_max_out_degree_node(G);
-    
+
     GrB_Scalar delta_scalar = NULL;
     GrB_Scalar_new(&delta_scalar, type);
     if (type == GrB_FP32) GrB_Scalar_setElement_FP32(delta_scalar, (float)atof(argv[4]));
@@ -73,7 +73,7 @@ int main(int argc, char **argv) {
     double t1 = LAGraph_WallClockTime();
     int result = LAGr_SingleSourceShortestPath(&dist, G, source, delta_scalar, msg);
     double t2 = LAGraph_WallClockTime();
-    
+
     if (result == GrB_SUCCESS) {
         GrB_Index reached; GrB_Vector_nvals(&reached, dist);
         printf("DIAG: SSSP Reached nodes: %llu\n", reached);
@@ -85,4 +85,3 @@ int main(int argc, char **argv) {
     LAGraph_Finalize(msg);
     return 0;
 }
-
