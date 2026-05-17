@@ -1,0 +1,16 @@
+algorithm,graph,num_hosts,run,time_ms
+tc,livejournal,1,1,372
+tc,livejournal,2,1,283
+tc,livejournal,4,1,227
+tc,livejournal,6,1,216
+tc,livejournal,8,1,280
+tc,rgg,1,1,72
+tc,rgg,2,1,43
+tc,rgg,4,1,27
+tc,rgg,6,1,36
+tc,rgg,8,1,39
+tc,roadnet,1,1,9
+tc,roadnet,2,1,5
+tc,roadnet,4,1,8
+tc,roadnet,6,1,10
+tc,roadnet,8,1,10

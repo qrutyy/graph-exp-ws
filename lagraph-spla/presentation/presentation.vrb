@@ -1,0 +1,25 @@
+\begin{minipage}{3in}
+^^I  \begin{Verbatim}[fontsize=\scriptsize]
+
+//--------------------------------------------------------------------------
+// sort the input matrix, if requested
+//--------------------------------------------------------------------------
+
+if (presort != LAGr_TriangleCount_NoSort)
+\{
+    // P = permutation that sorts the rows by their degree
+    LG_TRY (LAGr_SortByDegree (&P, G, true,
+        presort == LAGr_TriangleCount_Ascending, msg)) ;
+
+    // T = A (P,P) and typecast to boolean
+    GRB_TRY (GrB_Matrix_new (&T, GrB_BOOL, n, n)) ;
+    GRB_TRY (GrB_extract (T, NULL, NULL, A, (GrB_Index *) P, n,
+        (GrB_Index *) P, n, NULL)) ;
+    A = T ;
+
+    // free workspace
+    LG_TRY (LAGraph_Free ((void **) &P, NULL)) ;
+\}
+
+^^I  \end{Verbatim}
+^^I\end{minipage}
