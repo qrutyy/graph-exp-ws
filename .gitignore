@@ -239,3 +239,5 @@ galois/galois_gr/
 
 # Raw experiment logs (large, regenerate with scripts/run_experiments.py)
 galois/results/block2/raw/
+
+datasets/
