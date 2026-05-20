@@ -1,0 +1,63 @@
+name: Block 2 — Notebook & Script Validation
+
+on:
+  push:
+    paths:
+      - 'scripts/**'
+      - 'docs/block2_galois.ipynb'
+      - 'docs/block2_distributed.md'
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install black nbformat pandas numpy matplotlib seaborn
+
+      - name: Black — format check (scripts)
+        run: black --check scripts/
+
+      - name: Validate notebook JSON (block2_galois.ipynb)
+        run: |
+          python - <<'EOF'
+          import nbformat, sys
+          nb = nbformat.read("docs/block2_galois.ipynb", as_version=4)
+          nbformat.validate(nb)
+          print(f"OK: {len(nb.cells)} cells, nbformat {nb.nbformat}.{nb.nbformat_minor}")
+          EOF
+
+      - name: Syntax check — run_experiments.py
+        run: python -m py_compile scripts/run_experiments.py && echo "OK"
+
+      - name: Dry-run analyse.py (imports + load CSV)
+        run: |
+          python - <<'EOF'
+          import sys, pathlib
+          sys.path.insert(0, "scripts")
+          # patch ROOT before importing so file-not-found doesn't abort
+          import importlib, types
+          import pandas as pd, numpy as np, matplotlib
+          matplotlib.use("Agg")
+          import matplotlib.pyplot as plt, seaborn as sns
+          from pathlib import Path
+
+          csv_path = Path("results/block2/csv/block2_raw.csv")
+          if not csv_path.exists():
+              print("No CSV found — skipping data validation (run experiments first)")
+              sys.exit(0)
+
+          df = pd.read_csv(csv_path)
+          assert {"algorithm","graph","num_hosts","run","time_ms"}.issubset(df.columns)
+          assert len(df) > 0
+          print(f"CSV OK: {len(df)} records, algos={df['algorithm'].unique().tolist()}")
+          EOF

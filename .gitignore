@@ -233,3 +233,11 @@ poetry.toml
 pyrightconfig.json
 
 # End of https://www.toptal.com/developers/gitignore/api/macos,python,jupyternotebooks,linux
+
+# Galois converted graphs (large binaries, regenerate with scripts/run_experiments.py)
+galois/galois_gr/
+
+# Raw experiment logs (large, regenerate with scripts/run_experiments.py)
+galois/results/block2/raw/
+
+datasets/
