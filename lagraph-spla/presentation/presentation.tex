@@ -1,22 +1,15 @@
 \documentclass{beamer}
-%Для защит онлайн лучше использовать разрешение 16x9
-%\documentclass[aspectratio=169]{beamer}
 
 \input{preamble.tex}
 
-% То, что в квадратных скобках, отображается внизу по центру каждого слайда. 
 \title[SPLA, GraphBLAS+LAGraph]{Сравнение производительности алгоритмов на графах из SPLA/GraphBLAS+LAGraph}
 
-% То, что в квадратных скобках, отображается в левом нижнем углу. 
 \institute[СПбГУ]{}
-
-% То, что в квадратных скобках, отображается в левом нижнем углу.
 \author[Гавриленко Михаил]{Гавриленко Михаил, группа 23.Б15-мм}
- 
+
 \begin{document}
 {
 \setbeamertemplate{footline}{}
-% Лого университета или организации, отображается в шапке титульного листа
 \begin{frame}
   \includegraphics[width=1.4cm]{pictures/SPbGU_Logo.png}
 \vspace{-35pt}
@@ -28,365 +21,433 @@
     \end{tabular}
 \titlepage
 \end{center}
-
 \btVFill
-
 \begin{center}
   \vspace{5pt}
-  \scriptsize{Санкт-Петербург\\
-                 2023}
+  \scriptsize{Санкт-Петербург\\ 2023}
   \end{center}
-
 \end{frame}
 }
 
+% ============================================================
 \begin{frame}
   \frametitle{Постановка задачи}
-  \textbf{Целью} является исследование алгоритмов BFS, SSSP, TC, PR из библиотек SPLA и GraphBLAS/LAGraph  
+  \textbf{Цель}: исследовать алгоритмы BFS, SSSP, TC, PR из библиотек SPLA и GraphBLAS/LAGraph
 
   \textbf{Задачи}:
   \begin{itemize}
-	\item Сформулировать набор гипотез о производительности алгоритмов на основе базовых представлений о наивном алгоритме и особенностях платформ
-    \item Произвести замеры производительности реализаций из выбранных библиотек
-    \item Исследовать результаты и выявить особенности, отразившиеся на производительности 
-	\item Сделать выводы о ранее сформулированных гипотезах 
+    \item Сформулировать гипотезы о производительности
+    \item Произвести корректные замеры: правильный источник обхода, учёт JIT-разогрева GPU
+    \item Исследовать особенности: поддержку ориентированных/неориентированных графов,
+          влияние топологии на скорость
+    \item Сделать выводы о гипотезах
   \end{itemize}
 \end{frame}
-            
-\begin{frame}  
+
+% ============================================================
+\begin{frame}
   \frametitle{Детали экспериментов}
-  Использованные метрики:
+  \textbf{Методология}:
   \begin{itemize}
-	  \item Время выполнения (мс) 
-	  \item Степень прироста производительности SPLA относительно LAGraph 
-	  \item GTEPS(Giga Traversed Edges Per Second)
+    \item Источник обхода: вершина с максимальной исходящей степенью (стандарт LAGraph bench suite)
+    \item Прогревочный запуск отброшен (JIT OpenCL для SPLA, холодный кэш для LAGraph)
+    \item Медиана по 14 измерениям (итерации 2--15)
+    \item Профилирование через \texttt{GxB\_BURBLE} и Instruments (Xcode)
   \end{itemize}
-
-
-  Конфигурация системы:
+  \textbf{Конфигурация системы}:
   \begin{itemize}
-	  \item M2 Max (arm64), 38-gpu ядер 1000Мгц, 12-cpu ядер (8+4), 32ГБ ОЗУ
-	  \item OpenCL 1.2
-	\item clang 17.0.0
+    \item M2 Max (arm64): 12 CPU ядер (8P+4E), 38 GPU ядер @ 1000 МГц, 32 ГБ unified memory
+    \item OpenCL 1.2, clang 17.0.0, \texttt{OMP\_NUM\_THREADS=10}
   \end{itemize}
-
-    
-\end{frame}
-
-\begin{frame}
-	\frametitle{BFS: (первичные тезисы)}
+  \textbf{Датасеты}:
   \begin{itemize}
-    \item Исполнение алгоритма эффективнее на GPU 
-    \item GPU лучше справляется с симметричными датасетами, в отличии от CPU    
-	\item Преобразование в неориентированный граф увеличит вычислительную нагрузку, но улучшит показатель GTEPS за счет более эффективной работы Pull-фазы (bottom-up BFS)
-	\item Первая итерация на GPU будет значительно медленнее последующих из-за JIT-компиляции ядер OpenCL
+    \item soc-LiveJournal1 (68M рёбер, social), patents (15M, citation)
+    \item wiki-Talk (5M, communication), rgg\_n\_2\_22\_s0 (30M, geometric random)
+    \item roadNet-CA (2.7M, road) --- для TC
   \end{itemize}
 \end{frame}
 
+% ============================================================
+% BFS
+% ============================================================
 \begin{frame}
-	\frametitle{BFS: (детали алгоритмов)}
-  Оба алгоритма являются "pull-push", однако некоторые детали различаются: 
+  \frametitle{BFS: первичные тезисы}
   \begin{itemize}
-	  \item SPLA выбирает push/pull по плотности текущей фронтирной структуры
-	  \item LAGraph опирается на кэшированные свойства, в ином случае переключается на push-only
-	  \item В SPLA есть явный early-exit 
+    \item GPU эффективнее на социальных графах (широкий фронтир, малый диаметр)
+    \item На геометрических случайных графах (RGG) CPU выигрывает --- высокий диаметр,
+          многократные запуски ядер с низкой загрузкой GPU
+    \item LAGraph BFS на направленных графах требует кэша транспонированной матрицы
+          (\texttt{LAGraph\_Cached\_AT}) для включения режима push+pull
+    \item Первый запуск SPLA на GPU: 10--30× медленнее из-за JIT-компиляции ядер OpenCL
   \end{itemize}
 \end{frame}
 
 \begin{frame}
-  \frametitle{BFS}
-	\centering
-  \includegraphics[width=1\textwidth]{pictures/bfs/all.png}
+  \frametitle{BFS: поддержка направленных/ненаправленных графов}
+  \begin{block}{\texttt{LAGr\_BreadthFirstSearch}}
+    Поддерживает оба режима через \texttt{LAGraph\_Kind}:
+    \begin{itemize}
+      \item Без \texttt{LAGraph\_Cached\_AT}: только push-фаза (медленнее)
+      \item С \texttt{LAGraph\_Cached\_AT}: direction-optimising BFS (push + pull)
+    \end{itemize}
+  \end{block}
+  \begin{block}{SPLA BFS}
+    \texttt{--undirected=true/false}: симметризует матрицу перед построением графа
+  \end{block}
 \end{frame}
 
 \begin{frame}
-  \frametitle{BFS}
-	\centering
-  \includegraphics[width=1\textwidth]{pictures/bfs/all_mean_time.png}
+  \frametitle{BFS: результаты}
+  \centering
+  \includegraphics[width=1\textwidth]{pictures/bfs/bfs_all_datasets.png}
 \end{frame}
 
 \begin{frame}
-  \frametitle{BFS}
-
-	\centering
-  \includegraphics[width=1\textwidth]{pictures/bfs/all_gteps.png}
+  \frametitle{BFS: speedup GPU vs CPU}
+  \centering
+  \includegraphics[width=1\textwidth]{pictures/bfs/bfs_gpu_speedup.png}
 \end{frame}
 
 \begin{frame}
-  \frametitle{BFS}
-
-	\centering
-  \includegraphics[width=1\textwidth]{pictures/bfs/bfs_modes_livejournal_patents_run5.png}
+  \frametitle{BFS: профилирование --- фронтир по уровням}
+  \centering
+  \includegraphics[width=1\textwidth]{pictures/bfs/bfs_frontier_per_level.png}
 \end{frame}
 
 \begin{frame}
-	\frametitle{BFS}
-	\begin{itemize}
-		\item Push - обходит граф по направлению ребер.
-		\item Pull - обходит граф против направления ребер.
-		\item Алгоритм пытается проехать по улице с односторонним движением навстречу потоку. 
-		\item Он найдет вершины, из которых можно прийти во фронт, а не те, в которые можно попасть из фронта.
-		\item Чтобы алгоритм Direction-Optimizing BFS (переключение Push/Pull) корректно работал на направленных графах, для шага Pull необходимо использовать транспонированную матрицу.
-	\end{itemize}
+  \frametitle{BFS: профилирование --- итог по топологии}
+  \centering
+  \includegraphics[width=1\textwidth]{pictures/bfs/bfs_topology_summary.png}
+\end{frame}
 
+\begin{frame}
+  \frametitle{BFS: почему RGG невыгоден для GPU}
+  \begin{itemize}
+    \item RGG --- геометрический случайный граф: $\sim$4М вершин, $\sim$14 рёбер на вершину
+    \item BFS имеет 1048 уровней
+    \item Максимальный фронтир RGG: 7\,634 узла против 1.84М у LiveJournal
+	\item Накладные расходы OpenCL
+    \item SpLA directed: 706 мс vs LAGraph CPU: 534 мс --- CPU выигрывает на 32\%
+  \end{itemize}
+\end{frame}
+
+\begin{frame}
+  \frametitle{BFS: выводы}
+  \begin{itemize}
+    \item \textbf{SpLA GPU быстрее} на социальных/коммуникационных графах (LJ: 4.8×, wiki-Talk: 1.9×)
+    \item \textbf{CPU быстрее} на RGG --- высокий диаметр, малые фронтиры, низкая GPU-загрузка
+    \item \textbf{Ненаправленный BFS быстрее} на социальных графах за счёт двунаправленных рёбер в pull-фазе
+	\item BFS memory-bound: 10 потоков CPU (242 мс) медленнее 1 потока (202 мс) (OpenMP overhead)
+    \item patents directed: топологический эффект --- 0.01\% вершин достижимо вперёд из max-degree-node
+  \end{itemize}
+\end{frame}
+
+% ============================================================
+% SSSP
+% ============================================================
+\begin{frame}
+  \frametitle{SSSP: первичные тезисы}
+  \begin{itemize}
+    \item LAGraph SSSP работает на обоих типах графов
+    \item SPLA SSSP требует ненаправленный граф (push/pull нужна AT)
+    \item GPU эффективен на плотных социальных графах, менее выгоден на разреженных
+    \item Delta=1.0, unit-weights --- тестируем накладные расходы реализации
+  \end{itemize}
 \end{frame}
 
 \begin{frame}[fragile]
-	\begin{minipage}{3in}
-	  \begin{Verbatim}[fontsize=\scriptsize]
-if (push || (push_pull && is_push_better)) \{
-    exec_vxm_masked(frontier_new, v, frontier_prev, A, BAND_INT, BOR_INT, EQZERO_INT, zero, desc);
-\} else \{
-    exec_mxv_masked(frontier_new, v, A, frontier_prev, BAND_INT, BOR_INT, EQZERO_INT, zero, desc);
-\}
-	  \end{Verbatim}
-	\end{minipage}
+  \frametitle{SSSP: поддержка направленных/ненаправленных}
+  \begin{block}{LAGraph \texttt{LAGr\_SingleSourceShortestPath}}
+    Поддерживает оба режима: directed, undirected
+  \end{block}
+  \begin{alertblock}{SPLA SSSP: только ненаправленные графы}
+    SPLA SSSP использует push/pull-стратегию аналогично BFS.
+    Для pull-фазы необходима транспонированная матрица AT.
+    При \texttt{--undirected=false} результат может быть некорректным.
+  \end{alertblock}
 \end{frame}
 
 \begin{frame}
-  \frametitle{BFS}
+  \frametitle{SSSP: результаты}
+  \centering
+  \includegraphics[width=1\textwidth]{pictures/sssp/sssp_all_datasets.png}
+\end{frame}
 
-	Выводы:
-
+\begin{frame}
+  \frametitle{SSSP: wiki-Talk --- почему SPLA недоступен}
+  \begin{alertblock}{SPLA SSSP зависает на wiki-Talk}
+    Граф загружается успешно, вершина-источник выбирается, но вычисление
+    не завершается даже за 5 минут.
+  \end{alertblock}
+  \vspace{0.4em}
+  \textbf{Причина: экстремальное распределение степеней}
   \begin{itemize}
-	\item Выполнение большого кол-ва итераций с маленьким фронтиром - отрицательно действует на производительность GPU
-	\item Время обхода направленного графа зависит от его свойств - "длины" путей и "ширины" фронтиров. Высокий коэффициент кластеризации и малый диаметр соцсети позволяют быстро расширять фронтир и эффективно использовать параллелизм
-	\item SPLA эффективнее на больших графах с большой компонентой связности. На малых графах или при высокой фрагментации LAGraph предпочтительнее из-за низкой задержки CPU
-	\item SPLA с оптимизацией push-pull работает только на ненаправленных графах.
+    \item 74\% вершин имеют степень 1 (после симметризации)
+    \item Один хаб: степень 100\,029
+    \item Средняя степень: 3.9 --- граф очень разреженный
+  \end{itemize}
+  \vspace{0.4em}
+  \textbf{Как это ломает push/pull-переключение:}
+  \begin{itemize}
+    \item После первого раунда фронтир --- $\sim$100К соседей хаба
+    \item Каждый из них имеет степень $\sim$1--2 $\Rightarrow$
+  \end{itemize}
+  \vspace{0.3em}
+  \textit{LAGraph (CPU) справляется: 180 мс (directed), 126 мс (undirected)}
+\end{frame}
+
+\begin{frame}
+  \frametitle{SSSP: профилирование --- структура раундов (delta=1.0)}
+  \centering
+  \includegraphics[width=1\textwidth]{pictures/sssp/sssp_rounds_summary.png}
+\end{frame}
+
+\begin{frame}
+  \frametitle{SSSP: почему directed vs undirected ведут себя по-разному}
+  \centering
+  \includegraphics[width=0.97\textwidth]{pictures/sssp/sssp_dir_vs_undir_rounds.png}
+\end{frame}
+
+\begin{frame}
+  \frametitle{SSSP: directed vs undirected --- объяснение}
+  \begin{columns}
+    \column{0.5\textwidth}
+    \textbf{LiveJournal: directed $\approx$ undirected (+3.5\%)}
+    \begin{itemize}
+      \item Социальная сеть --- уже почти симметричная
+      \item Симметризация добавляет мало рёбер, новых коротких путей нет
+      \item Одинаковое число раундов (13), но чуть больше nnz в матрице
+      \item Результат: небольшой overhead
+    \end{itemize}
+    \column{0.5\textwidth}
+    \textbf{wiki-Talk: undirected быстрее на 30\%}
+    \begin{itemize}
+      \item Граф сильно асимметричный: хаб с 100К рёбер исходящих
+      \item Undirected round 4: 2.16М вершин (90\% графа) за один раунд
+      \item Directed: медленное распространение, больше раундов
+    \end{itemize}
+  \end{columns}
+\end{frame}
+
+\begin{frame}
+  \frametitle{SSSP: влияние параметра delta (реальные веса, DIMACS10)}
+  \centering
+  \includegraphics[width=1\textwidth]{pictures/sssp/sssp_delta_sweep_real.png}
+\end{frame}
+
+\begin{frame}
+  \frametitle{SSSP: BFS-уровни vs SSSP-раунды}
+  \centering
+  \includegraphics[width=0.95\textwidth]{pictures/sssp/sssp_vs_bfs_levels.png}
+\end{frame}
+
+\begin{frame}
+  \frametitle{SSSP: GPU speedup}
+  \centering
+  \includegraphics[width=1\textwidth]{pictures/sssp/sssp_gpu_speedup.png}
+\end{frame}
+
+\begin{frame}
+  \frametitle{SSSP: выводы}
+  \begin{itemize}
+    \item Delta=1.0 + unit weights: каждое ребро ``лёгкое'' $\Rightarrow$ delta-stepping
+          вырождается в BFS-подобную обработку --- \textbf{раунд = BFS-уровень}
+	\item Оптимальное значение delta = 100000
+    \item Ненаправленный SSSP медленнее на patents (+1100\%): симметризация
+          добавляет миллионы рёбер для релаксации
+  \end{itemize}
+\end{frame}
+
+% ============================================================
+% PageRank
+% ============================================================
+\begin{frame}
+  \frametitle{PageRank: первичные тезисы}
+  \begin{itemize}
+    \item Основная операция: \textbf{SpMV}
+    \item В отличие от BFS: нет разреженного фронтира --- GPU загружен на каждой итерации
+    \item Гипотеза: GPU покажет многократное ускорение на \textbf{всех} графах
   \end{itemize}
 \end{frame}
 
 \begin{frame}
-  \frametitle{SSSP}
+  \frametitle{PageRank: результаты}
+  \centering
+  \includegraphics[width=1\textwidth]{pictures/pr/pr_all_datasets.png}
+\end{frame}
+
+\begin{frame}
+  \frametitle{PageRank: GPU speedup}
+  \centering
+  \includegraphics[width=0.85\textwidth]{pictures/pr/pr_gpu_speedup.png}
+\end{frame}
+
+\begin{frame}
+  \frametitle{PageRank: профилирование --- доля фаз}
+  \centering
+  \includegraphics[width=0.9\textwidth]{pictures/pr/pr_phase_fraction.png}
+\end{frame}
+
+\begin{frame}
+  \frametitle{PageRank: выводы}
+      \begin{itemize}
+        \item SpLA GPU: \textbf{23--39×} быстрее LAGraph CPU на всех трёх графах
+        \item PageRank принципиально отличается от BFS: ранговый вектор плотный,
+              SpMV всегда полностью нагружает GPU
+        \item SpMV = \textbf{84--89\%} времени итерации на крупных графах (LiveJournal, RGG)
+        \item \textbf{Корректность SPLA GPU подтверждена}: \texttt{verify\_exact} сравнивает
+              GPU-ранки с наивной референсной реализацией поэлементно ($|gpu_i - ref_i| \leq 0.005$,
+              \texttt{assert} при несовпадении)
+      \end{itemize}
+\end{frame}
+
+% ============================================================
+% TC
+% ============================================================
+\begin{frame}
+  \frametitle{TC: первичные тезисы}
   \begin{itemize}
-    \item Исполнение алгоритма эффективнее на GPU 
-    \item GPU лучше справляется с симметричными датасетами, в отличии от CPU    GPU (SPLA) покажет значительное преимущество на графах с плотной структурой и широким фронтиром
-	\item SSSP в SPLA не работает с ориентированными графами 
+    \item GPU должен показывать многократное преимущество --- masked SpMM идеально ложится на архитектуру
+    \item На разреженных графах (road) GPU менее эффективен из-за накладных расходов
+    \item Предварительная сортировка вершин по степени важна для семейства Sandia на CPU ---
+          но \textbf{только при правильных условиях}
+  \end{itemize}
+\end{frame}
+
+\begin{frame}
+  \frametitle{TC: алгоритмы Sandia}
+  Семейство Sandia использует разбиение на нижнетреугольную (L) и верхнетреугольную (U) части:
+  \begin{itemize}
+    \item \textbf{Sandia\_LL}: $\text{ntri} = \sum L \cdot (L \times L)$ --- нижняя $\times$ нижняя
+    \item \textbf{Sandia\_LUT}: $\text{ntri} = \sum L \cdot (L \times U^T)$ --- нижняя $\times$ верхняя$^T$
+    \item \textbf{Burkhardt}: $\text{ntri} = \frac{1}{6}\sum (A^2 \cdot A)$ --- полная матрица
+    \item \textbf{Cohen}: через пересечение списков смежности
+  \end{itemize}
+
+  Ключевая операция: для каждого ребра $(i,j)$ в $L$ считаем пересечение $L[i,:] \cap L[j,:]$.
+\end{frame}
+
+\begin{frame}
+  \frametitle{TC: почему сортировка должна помогать}
+  \textbf{Аргумент стоимости пересечения:}
+  \begin{itemize}
+    \item При сортировке по возрастанию степени: строка $i$ в $L$ имеет $\leq d(i)$ ненулей
+    \item Вершины с малой степенью --- в начале матрицы, пересечения их списков дёшевы
+    \item Стоимость пересечения $\approx O(d(i) + d(j))$ --- минимизируется когда оба малы
+  \end{itemize}
+\end{frame}
+
+\begin{frame}
+  \frametitle{TC: эвристика AutoSort}
+  AutoSort LAGraph включает сортировку если выполнены \textbf{все} условия:
+  \begin{itemize}
+    \item $n > 2000$ --- граф достаточно большой для амортизации стоимости
+    \item $\text{density} > 10$ --- средняя степень достаточна для выгоды
+    \item $\text{mean} > 3 \times \text{median}$ --- степенной закон (наличие хабов)
   \end{itemize}
 
 \end{frame}
 
 \begin{frame}
-  \frametitle{SSSP}
-
-	\centering
-	\includegraphics[width=1\textwidth]{pictures/sssp/mean_time.png}
-
+  \frametitle{TC: все методы × стратегии сортировки (LiveJournal)}
+  \centering
+  \includegraphics[width=1\textwidth]{pictures/tc/tc_methods_sort_livejournal.png}
 \end{frame}
 
 \begin{frame}
-  \frametitle{SSSP}
-	\centering
-	\includegraphics[width=1\textwidth]{pictures/sssp/mean_sym_time.png}
+  \frametitle{TC: эвристика AutoSort --- эмпирика}
+  \centering
+  \includegraphics[width=1\textwidth]{pictures/tc/tc_autosort_heuristic.png}
+\end{frame}
 
+\begin{frame}
+  \frametitle{TC: почему сортировка не помогает на наших данных}
+  \begin{block}{Профилирование (GxB\_BURBLE, soc-LiveJournal1, 20 запусков)}
+    \begin{table}[htbp]
+      \centering
+      \begin{tabular}{lccc}
+        \hline
+        Операция & NoSort & Asc & Desc \\
+        \hline
+        mxm & 5.71с (25.5\%) & 5.72с (22.9\%) & 5.76с (23.1\%) \\
+        Matrix\_extract & --- & 2.36с (9.4\%) & 2.44с (9.8\%) \\
+        SortByDegree & --- & 0.36с (1.4\%) & 0.36с (1.5\%) \\
+        \hline
+        \textbf{Итого} & \textbf{5.71с} & \textbf{7.33с} & \textbf{7.38с} \\
+        \hline
+      \end{tabular}
+    \end{table}
+  \end{block}
+  \begin{itemize}
+    \item \texttt{Matrix\_extract} (перестановка $A(P,P)$): +2.36с --- предположительно промахи кэша
+    \item Предполагаем сортировка окупается на графах $10\times$ больше, где mxm длится минуты
+  \end{itemize}
 \end{frame}
 
 \begin{frame}[fragile]
-	\begin{minipage}{3in}
-	  \begin{Verbatim}[fontsize=\scriptsize]
-if (push || (push_pull && is_push_better)) \{
-    exec_vxm_masked(frontier, dummy_mask, feedback, A, PLUS_FLOAT, MIN_FLOAT, ALWAYS_FLOAT, inf_init);
-\} else \{
-    exec_mxv_masked(frontier, dummy_mask, A, feedback, PLUS_FLOAT, MIN_FLOAT, ALWAYS_FLOAT, inf_init);
-\}
-	  \end{Verbatim}
-	\end{minipage}
-\end{frame}
+  \frametitle{TC: код сортировки (LAGraph source)}
+  \begin{Verbatim}[fontsize=\scriptsize]
+if (presort != LAGr_TriangleCount_NoSort) {
+    // Step 1: compute degree permutation P
+    LAGr_SortByDegree(&P, G, true,
+        presort == LAGr_TriangleCount_Ascending, msg);
 
-\begin{frame}
-  \frametitle{SSSP}
+    // Step 2: permute A -> T = A(P,P)  -- O(nnz), cache-heavy
+    GrB_Matrix_new(&T, GrB_BOOL, n, n);
+    GrB_extract(T, NULL, NULL, A,
+        (GrB_Index*)P, n, (GrB_Index*)P, n, NULL);
+    A = T;
+}
+
+// Step 3: L = tril(A), then count = reduce(L .* (L*L))
+  \end{Verbatim}
   \begin{itemize}
-	  \item В графе патентов (где 3.7 млн узлов) вершина с наибольшим кол-вом исходящих ребер связана только с 776 другими вершинами. У LiveJournal вершина имеет в 20 раз больше выходящих ребер
-	  \item На LiveJournal GPU работает в 4.7 раза быстрее CPU. Это "родная" среда для массивного параллелизма SPLA
-	  \item Ситуация с поддержкой ориентированных графов - точно такая же, как и в BFS. (алгоритм использует hybrid push/pull execution) 
-
-  \end{itemize}
-	\textbf{Общий вывод:} Для алгоритма SSSP выбор вычислительного устройства критически зависит от топологии.
-
-\end{frame}
-
-\begin{frame}
-  \frametitle{PageRank}
-  \begin{itemize}
-    \item Эффективность GPU-ускорения прямо пропорциональна регулярности структуры графа 
-    \item  Низкая средняя степень узла делает использование GPU нецелесообразным    
-	\item Неравномерность распределения в безмасштабных сетях снижает потенциал GPU по сравнению с регулярными структурами
+    \item \texttt{GrB\_extract} с индексными массивами = случайная перестановка nnz записей
+    \item Именно эта операция съедает 2.36с при любой сортировке
   \end{itemize}
 \end{frame}
 
 \begin{frame}
-  \frametitle{PageRank}
-	\centering
-	\includegraphics[width=1\textwidth]{pictures/pr/median_time.png}
+  \frametitle{TC: все методы × все датасеты}
+  \centering
+  \includegraphics[width=1\textwidth]{pictures/tc/tc_heatmap_all.png}
 \end{frame}
 
 \begin{frame}
-  \frametitle{PageRank}
-	\centering
-	\includegraphics[width=1\textwidth]{pictures/pr/speedup.jpg}
+  \frametitle{TC: speedup}
+  \centering
+  \includegraphics[width=1\textwidth]{pictures/tc/time_speedup.png}
 \end{frame}
 
 \begin{frame}
-  \frametitle{PageRank}
-	\centering
-	\includegraphics[width=1\textwidth]{pictures/pr/throughput.png}
-\end{frame}
-
-\begin{frame}
-  \frametitle{PageRank}
-	\begin{itemize}
-		\item Cтепени узлов распределены равномерно, что минимизирует простой ядер GPU
-		\item Дорожные графы эффективнее на CPU. Накладные расходы на запуск ядер и обращение к памяти GPU не окупаются малым объемом вычислений на одно ребро.
-
-	\textbf{Общий вывод:} SPLA эффективен на "тяжелых" графах с большим количеством ребер, но его преимущество нивелируется при сильной разреженности (дороги) или экстремальной неравномерности (социальные сети).
-	\end{itemize}
-
-\end{frame}
-
-\begin{frame}
-  \frametitle{TC}
+  \frametitle{TC: выводы}
   \begin{itemize}
-	  \item Архитектура GPU должна показывать многократное преимущество в данной задаче 
-	  \item На разреженных графах с низкой средней степенью/ (road) эффективность GPU будет ниже, чем на плотных или регулярных из-за накаладных расходов    
-		\item Для алгоритмов семейства Sandia на CPU предварительная сортировка узлов по степени критически важна для минимизации количества вычислений
+    \item SpLA GPU: ускорение до \textbf{84.5×} на LiveJournal --- masked SpMM идеально параллелен
+    \item \textbf{NoSort побеждает} на всех тестируемых графах: overhead перестановки ($\sim$2.7с) $\gg$ выгода mxm ($\sim$0.01с)
+    \item AutoSort корректно определяет условие (LiveJournal: ratio=3.55>3), но недооценивает стоимость \texttt{Matrix\_extract}
   \end{itemize}
 \end{frame}
 
-\begin{frame}
-  \frametitle{TC}
-	\centering
-	\includegraphics[width=1\textwidth]{pictures/tc/mean_time.png}
-\end{frame}
-
-\begin{frame}
-  \frametitle{TC}
-	\centering
-  \includegraphics[width=1\textwidth]{pictures/tc/methods_time.png}
-\end{frame}
-
-\begin{frame}
-  \frametitle{TC}
-	\centering
-  \includegraphics[width=1\textwidth]{pictures/tc/sandia_lut_methods_time.png}
-\end{frame}
-
-\begin{frame}
-  \frametitle{TC}
-	Основные операции в TC Sandia
-  \begin{itemize}
-	  \item Взять список сетей U
-	  \item Взять список сетей V 
-	  \item Найти пересечение 
-  \end{itemize}
-\end{frame}
-
-\begin{frame}
-  \frametitle{TC}
-  Сортировка является ключевой оптимизацией в случае семейства алгоритмов Sandia. 
-	Сортировка уменьшает стоимость одного пересечения увеличивая cache locality, меньше случайного доступа. 
-	Условия включения сортировки при выбранном режиме AutoSort.
-  \begin{itemize}
-	  \item n > 2000
-	  \item density > 10
-	  \item mean > 3 * median (определяет насколько граф powel-law)
-  \end{itemize}
-\end{frame}
-
-\begin{frame}
-  \frametitle{TC}
-	\begin{table}[htbp]
-		\centering
-\begin{tabular}{lcccc}
-\hline
-Name & Mean & Median & Ratio & Density \\
-\hline
-rgg\_n\_2\_22\_s0 & 14,4 & 14 & 1 & 14,47 \\
-soc-LiveJournal1  & 14,2 & 4  & 3,5 & 14,12 \\
-roadNet-CA        & 2,79 & 3  & 0,9 & 2,8 \\
-\hline
-\end{tabular}
-		\caption{LAGraph TC, Graphs details}
-		\label{tab:comparison}
-	\end{table}
-\end{frame}
-
-\begin{frame}
-  \frametitle{TC}
-	\begin{itemize}
-		\item На основе предыдущих графиков можем сделать вывод, что ни на одном графе (даже на soc-LiveJournal, который явно подходит под AutoSort) мы не получили прироста. 
-		\item Наоборот, при выборе NoSort - производительность оказалась выше, чем при принудительно Asc и Desc.
-		\item Причина падения производительности может заключаться в затратах на предварительную сортировку графа.
-	\end{itemize}
-\end{frame}
-\begin{frame}[fragile]
-	\begin{minipage}{3in}
-	  \begin{Verbatim}[fontsize=\scriptsize]
-
-//--------------------------------------------------------------------------
-// sort the input matrix, if requested
-//--------------------------------------------------------------------------
-
-if (presort != LAGr_TriangleCount_NoSort)
-\{
-    // P = permutation that sorts the rows by their degree
-    LG_TRY (LAGr_SortByDegree (&P, G, true,
-        presort == LAGr_TriangleCount_Ascending, msg)) ;
-
-    // T = A (P,P) and typecast to boolean
-    GRB_TRY (GrB_Matrix_new (&T, GrB_BOOL, n, n)) ;
-    GRB_TRY (GrB_extract (T, NULL, NULL, A, (GrB_Index *) P, n,
-        (GrB_Index *) P, n, NULL)) ;
-    A = T ;
-
-    // free workspace
-    LG_TRY (LAGraph_Free ((void **) &P, NULL)) ;
-\}
-
-	  \end{Verbatim}
-	\end{minipage}
-\end{frame}
-
-\begin{frame}
-  \frametitle{TC}
-	\begin{table}[htbp]
-	\centering
-	\begin{tabular}{lccc}
-	\hline
-	Symbol & NoSort & Asc & Desc \\
-	\hline
-		mxm & 25,5\% (5,71s) & 22,9\% (5,72s) & 23,1\% (5,76s) \\
-		Matrix\_extract & None & 9,4\% (2,36s) & 9,8\% (2,44s) \\
-		Matrix\_reduce & 0,3\% (0,06s) & None & None \\
-		SortByDegree & None & 1,4\% (0,36s) & 1,5\% (0,36s) \\
-	\hline
-	\end{tabular}
-	\caption{LAGraph TC, sort variations}
-	\label{tab:comparison}
-	\end{table}
-\end{frame}
-
-\begin{frame}
-  \frametitle{TC}
-
-	После сортировки:
-  \begin{itemize}
-	  \item маленькие узлы пересекаются друг с другом (дёшево)
-	\item хабы концентрируются и реже пересекаются с другими хабами
-  \end{itemize}
-\end{frame}
-
-\begin{frame}
-  \frametitle{TC}
-  \begin{itemize}
-	  \item Ускорение на GPU достигает 84.5х. Задача Triangle Counting, основанная на пересечении множеств, идеально ложится на архитектуру SPLA
-	\item Предположение о том, что Ascending Sort всегда ускоряет TC на CPU, опровергнуто. Несмотря на схождение требований эвристик с характеристиками графа soc-LiveJournal1 - не получили прироста.
-	\item Самой быстрой стратегией для TC на CPU является использование наиболее эффективного алгоритма (Sandia LUT или LL) на исходном порядке узлов (NoSort), чтобы избежать дорогостоящих операций перестановки матриц
-	  \item Высокий GTEPS на дорогах говорит о том, что маскирование в SPLA работает исключительно эффективно даже при малом количестве треугольников  
-  \end{itemize}
-\end{frame}
-
-%\addtocounter{framenumber}{1}
 \appendix
 
+\begin{frame}[fragile]
+  \frametitle{BFS: direction-optimizing алгоритм (SPLA)}
+  \begin{itemize}
+    \item Push: обходит граф по направлению рёбер (фронтир $\rightarrow$ соседи)
+    \item Pull: обходит граф против направления (непосещённые $\rightarrow$ фронтир через AT)
+    \item Переключение по плотности текущего фронтира
+  \end{itemize}
+\begin{Verbatim}[fontsize=\scriptsize]
+if (push || (push_pull && is_push_better)) {
+    exec_vxm_masked(frontier_new, v, frontier_prev, A, ...);
+} else {
+    exec_mxv_masked(frontier_new, v, A, frontier_prev, ...);
+}
+\end{Verbatim}
+  \begin{itemize}
+    \item Для Pull на направленных графах необходима AT (\texttt{LAGraph\_Cached\_AT})
+    \item Без AT: только push-фаза, алгоритм медленнее на плотных фронтирах
+  \end{itemize}
+\end{frame}
 
 \end{document}
