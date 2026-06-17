@@ -1,2 +1,1 @@
-pdflatex --shell-escape presentation.tex
-evince  presentation.pdf &
+xelatex --shell-escape presentation.tex
